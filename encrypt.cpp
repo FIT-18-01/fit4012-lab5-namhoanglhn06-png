@@ -6,9 +6,31 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
+#include <vector>
+#include <algorithm>
+#include <cctype>
 #include "structures.h"
 
 using namespace std;
+
+bool ParseHexKey(const string &hexString, unsigned char key[16]) {
+    string cleanHex = hexString;
+    cleanHex.erase(remove_if(cleanHex.begin(), cleanHex.end(), [](unsigned char ch) { return isspace(ch); }), cleanHex.end());
+    if (cleanHex.size() != 32) {
+        return false;
+    }
+
+    for (int idx = 0; idx < 16; idx++) {
+        unsigned int byteValue;
+        istringstream byteStream(cleanHex.substr(idx * 2, 2));
+        if (!(byteStream >> std::hex >> byteValue)) {
+            return false;
+        }
+        key[idx] = static_cast<unsigned char>(byteValue);
+    }
+    return true;
+}
 
 /* Serves as the initial round during encryption
  * AddRoundKey is simply an XOR of a 128-bit block with the 128-bit key.
@@ -177,17 +199,15 @@ int main() {
 		getline(infile, str); // The first line of file should be the key
 		infile.close();
 	}
+	else {
+		cout << "Unable to open keyfile" << endl;
+		return 1;
+	}
 
-	else cout << "Unable to open file";
-
-	istringstream hex_chars_stream(str);
 	unsigned char key[16];
-	int i = 0;
-	unsigned int c;
-	while (hex_chars_stream >> hex >> c)
-	{
-		key[i] = c;
-		i++;
+	if (!ParseHexKey(str, key)) {
+		cout << "Invalid key format in keyfile" << endl;
+		return 1;
 	}
 
 	unsigned char expandedKey[176];
@@ -199,24 +219,27 @@ int main() {
 	}
 
 	cout << "Encrypted message in hex:" << endl;
-	for (int i = 0; i < paddedMessageLen; i++) {
-		cout << hex << (int) encryptedMessage[i];
-		cout << " ";
+	for (int idx = 0; idx < paddedMessageLen; idx++) {
+		cout << hex << setw(2) << setfill('0') << (int)encryptedMessage[idx] << " ";
 	}
 
-	cout << endl;
+	cout << dec << endl;
 
-	// Write the encrypted string out to file "message.aes"
+	// Write the encrypted bytes out to file "message.aes"
 	ofstream outfile;
 	outfile.open("message.aes", ios::out | ios::binary);
 	if (outfile.is_open())
 	{
-		outfile << encryptedMessage;
+		outfile.write(reinterpret_cast<const char *>(encryptedMessage), paddedMessageLen);
 		outfile.close();
 		cout << "Wrote encrypted message to file message.aes" << endl;
 	}
-
-	else cout << "Unable to open file";
+	else {
+		cout << "Unable to open message.aes for writing" << endl;
+		delete[] paddedMessage;
+		delete[] encryptedMessage;
+		return 1;
+	}
 
 	// Free memory
 	delete[] paddedMessage;

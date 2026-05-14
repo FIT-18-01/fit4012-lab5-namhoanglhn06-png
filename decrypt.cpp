@@ -6,9 +6,31 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
+#include <vector>
+#include <algorithm>
+#include <cctype>
 #include "structures.h"
 
 using namespace std;
+
+bool ParseHexKey(const string &hexString, unsigned char key[16]) {
+    string cleanHex = hexString;
+    cleanHex.erase(remove_if(cleanHex.begin(), cleanHex.end(), [](unsigned char ch) { return isspace(ch); }), cleanHex.end());
+    if (cleanHex.size() != 32) {
+        return false;
+    }
+
+    for (int idx = 0; idx < 16; idx++) {
+        unsigned int byteValue;
+        istringstream byteStream(cleanHex.substr(idx * 2, 2));
+        if (!(byteStream >> std::hex >> byteValue)) {
+            return false;
+        }
+        key[idx] = static_cast<unsigned char>(byteValue);
+    }
+    return true;
+}
 
 /* Used in Round() and serves as the final round during decryption
  * SubRoundKey is simply an XOR of a 128-bit block with the 128-bit key.
@@ -145,32 +167,28 @@ int main() {
 	cout << "=============================" << endl;
 
 	// Read in the message from message.aes
-	string msgstr;
-	ifstream infile;
-	infile.open("message.aes", ios::in | ios::binary);
+	vector<unsigned char> encryptedMessage;
+	ifstream infile("message.aes", ios::in | ios::binary);
 
 	if (infile.is_open())
 	{
-		getline(infile, msgstr); // The first line of file is the message
+		infile.seekg(0, ios::end);
+		streampos fileSize = infile.tellg();
+		infile.seekg(0, ios::beg);
+
+		if (fileSize > 0) {
+			encryptedMessage.resize(static_cast<size_t>(fileSize));
+			infile.read(reinterpret_cast<char *>(encryptedMessage.data()), fileSize);
+		}
+
 		cout << "Read in encrypted message from message.aes" << endl;
 		infile.close();
 	}
 
-	else cout << "Unable to open file";
-
-	char * msg = new char[msgstr.size()+1];
-
-	strcpy(msg, msgstr.c_str());
-
-	int n = strlen((const char*)msg);
-
-	unsigned char * encryptedMessage = new unsigned char[n];
-	for (int i = 0; i < n; i++) {
-		encryptedMessage[i] = (unsigned char)msg[i];
+	else {
+		cout << "Unable to open file" << endl;
+		return 1;
 	}
-
-	// Free memory
-	delete[] msg;
 
 	// Read in the key
 	string keystr;
@@ -184,39 +202,41 @@ int main() {
 		keyfile.close();
 	}
 
-	else cout << "Unable to open file";
+	else {
+		cout << "Unable to open keyfile" << endl;
+		return 1;
+	}
 
-	istringstream hex_chars_stream(keystr);
 	unsigned char key[16];
-	int i = 0;
-	unsigned int c;
-	while (hex_chars_stream >> hex >> c)
-	{
-		key[i] = c;
-		i++;
+	if (!ParseHexKey(keystr, key)) {
+		cout << "Invalid key format in keyfile" << endl;
+		return 1;
 	}
 
 	unsigned char expandedKey[176];
 
 	KeyExpansion(key, expandedKey);
 	
-	int messageLen = strlen((const char *)encryptedMessage);
+	size_t messageLen = encryptedMessage.size();
+	if (messageLen % 16 != 0) {
+		cout << "Invalid ciphertext length: must be a multiple of 16 bytes." << endl;
+		return 1;
+	}
 
-	unsigned char * decryptedMessage = new unsigned char[messageLen];
+	vector<unsigned char> decryptedMessage(messageLen);
 
-	for (int i = 0; i < messageLen; i += 16) {
-		AESDecrypt(encryptedMessage + i, expandedKey, decryptedMessage + i);
+	for (size_t idx = 0; idx < messageLen; idx += 16) {
+		AESDecrypt(encryptedMessage.data() + idx, expandedKey, decryptedMessage.data() + idx);
 	}
 
 	cout << "Decrypted message in hex:" << endl;
-	for (int i = 0; i < messageLen; i++) {
-		cout << hex << (int)decryptedMessage[i];
-		cout << " ";
+	for (size_t idx = 0; idx < messageLen; idx++) {
+		cout << hex << setw(2) << setfill('0') << (int)decryptedMessage[idx] << " ";
 	}
-	cout << endl;
+	cout << dec << endl;
 	cout << "Decrypted message: ";
-	for (int i = 0; i < messageLen; i++) {
-		cout << decryptedMessage[i];
+	for (size_t idx = 0; idx < messageLen; idx++) {
+		cout << decryptedMessage[idx];
 	}
 	cout << endl;
 
